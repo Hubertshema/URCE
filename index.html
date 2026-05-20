@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="monetag" content="4daa0c7243b6886d05e6b8e90551cf3f">
+    <title>Student Marks Checker - UR CE</title>
+    
+    <!-- Supabase JS Library -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            text-align: center;
+            margin-top: 40px;
+            background-color: #e6f0fa; 
+            color: #333; 
+        }
+        .container { 
+            background: white; 
+            border-radius: 8px; 
+            box-shadow: 0px 4px 15px rgba(0,0,0,0.2); 
+            display: inline-block; 
+            max-width: 650px; 
+            width: 90%; 
+            overflow: hidden; 
+            padding-bottom: 20px; 
+        }
+        .header-info { background-color: #004488; color: white; padding: 20px; }
+        .header-info h2 { margin: 0 0 10px 0; font-size: 24px; }
+        .header-info p { margin: 5px 0; font-size: 14px; }
+        .header-info a { color: #b3d9ff; text-decoration: none; }
+        .search-section { padding: 30px 20px 10px 20px; }
+        input[type="text"] { padding: 12px; width: 70%; margin-bottom: 15px; border: 2px solid #004488; border-radius: 4px; font-size: 16px; box-sizing: border-box; }
+        input[type="submit"] { padding: 12px 25px; background: #004488; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; }
+        input[type="submit"]:hover { background: #003366; }
+        table { width: 90%; border-collapse: collapse; margin: 20px auto; }
+        th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
+        th { background-color: #004488; color: white; width: 40%; }
+        td { background-color: #f9f9f9; }
+        .error { color: red; margin-top: 15px; font-weight: bold; }
+        .fail-mark { color: red; font-weight: bold; }
+        
+        .btn-group { margin-top: 20px; }
+        .btn-print { padding: 10px 20px; background-color: #28a745; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 15px; font-weight: bold; margin-right: 10px; }
+        .btn-print:hover { background-color: #218838; }
+        .btn-reset { display: inline-block; padding: 10px 20px; background-color: #cc0000; color: white; text-decoration: none; border: none; border-radius: 4px; font-weight: bold; font-size: 15px; cursor: pointer; }
+        .btn-reset:hover { background-color: #990000; }
+        #loading { display: none; font-weight: bold; color: #004488; margin: 20px 0; }
+
+        @media print {
+            body { background-color: white; margin: 0; padding: 0; }
+            .container { box-shadow: none; width: 100%; max-width: 100%; margin: 0; padding: 0; }
+            .no-print { display: none !important; }
+            th { background-color: #004488 !important; color: white !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .header-info { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header-info">
+        <h2>College of Education</h2><br>
+        <h3>Rukara Campus</h3>
+    </div>
+
+    <div class="search-section">
+        
+        <div id="form-section">
+            <h3 style="color: #004488;" class="no-print">Check Your Marks</h3>
+            <form id="searchForm" class="no-print">
+                <input type="text" id="student_name" placeholder="Enter Your Full Name" required>
+                <br>
+                <input type="text" id="reg_number" placeholder="Enter Registration Number (ID)" required>
+                <br>
+                <input type="submit" value="Check Marks">
+            </form>
+        </div>
+
+        <div id="loading">Searching records, please wait...</div>
+        <div id="result-section" style="display: none;"></div>
+
+    </div>
+</div>
+
+<footer>
+    <div class="no-print" style="margin-top: 30px; padding: 15px; border-top: 1px solid #ddd;">
+        <a href="about.html" style="color: #004488; text-decoration: none; margin-right: 15px;">About Us</a>
+        <span style="color: #999;">|</span>
+        <a href="privacy.html" style="color: #004488; text-decoration: none; margin-left: 15px;">Privacy Policy</a>
+    </div>
+</footer>
+
+<script>
+    // --- 1. SET UP SUPABASE ---
+    // Make sure to add your actual Project URL here:
+    const SUPABASE_URL = "YOUR_SUPABASE_URL"; 
+    
+    // Publishable key from your screenshot (Make sure to copy the full key from your dashboard to replace the "...")
+    const SUPABASE_ANON_KEY = "sb_publishable_3231Up9c0Te8d0i1qEAnpA_MQKbS...";
+    
+    // Initialize Supabase client
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // --- 2. LIST OF CSV FILES ---
+    const filesToSearch = [
+        'marks.csv', 'MCE.csv', 'ME.csv', 'MPE.csv', 'PSE.CSV', 'BSE.csv', 
+        'PCE.csv', 'PGE3.CSV', 'PCE3.CSV', 'BCE3.CSV', 'EPSYEAR1.csv', 
+        'ECEYEAR1.csv', 'SNEYEAR1.csv', 'BCEYEAR1.csv', 'CSEYEAR1.csv', 
+        'MEYEAR1.csv', 'MCEYEAR1.csv', 'MPEYEAR1.csv', 'PCEYEAR1.csv', 'PESYEAR1.csv'
+    ];
+
+    document.getElementById('searchForm').addEventListener('submit', async function(e) {
+        e.preventDefault();
+
+        const studentName = document.getElementById('student_name').value.trim();
+        const regNumber = document.getElementById('reg_number').value.trim();
+        
+        const formSection = document.getElementById('form-section');
+        const resultSection = document.getElementById('result-section');
+        const loadingDiv = document.getElementById('loading');
+
+        formSection.style.display = 'none';
+        resultSection.style.display = 'none';
+        loadingDiv.style.display = 'block';
+
+        let found = false;
+
+        for (const file of filesToSearch) {
+            try {
+                const response = await fetch(file);
+                if (!response.ok) continue; 
+                
+                const csvText = await response.text();
+                const lines = csvText.split('\n').map(line => line.replace(/\r/g, '').trim()).filter(line => line.length > 0);
+                if (lines.length < 2) continue; 
+
+                const headers = lines[0].split(',').map(h => h.trim());
+
+                for (let i = 1; i < lines.length; i++) {
+                    const row = lines[i].split(',').map(c => c.trim());
+                    
+                    if (row[1] === regNumber) {
+                        found = true;
+                        
+                        // Render UI immediately
+                        renderResults(headers, row, regNumber);
+                        
+                        // Send log to Supabase in the background
+                        logVisitToSupabase(studentName, regNumber);
+                        
+                        break; 
+                    }
+                }
+                if (found) break; 
+            } catch (error) {
+                console.warn(`Could not load ${file}:`, error);
+            }
+        }
+
+        loadingDiv.style.display = 'none';
+
+        if (!found) {
+            resultSection.innerHTML = `
+                <p class='error'>Registration Number not found in any record. Please verify your ID.</p>
+                <div class="no-print" style="margin-top: 20px;">
+                    <button onclick="resetSearch()" class="btn-reset">Try Again</button>
+                </div>
+            `;
+            resultSection.style.display = 'block';
+        }
+    });
+
+    function renderResults(headers, row, regNumber) {
+        const resultSection = document.getElementById('result-section');
+        const metadataColumns = ['s/n', 'id', 'gender', 'total', 'percentage', 'per', 'rank'];
+        
+        let html = `<h3 style='color: #004488; margin-top:10px;'>Official Results</h3>`;
+        html += `<h4 style='color: #333;'>Reg Number: ${regNumber}</h4>`;
+        html += `<table>`;
+
+        for (let i = 0; i < headers.length; i++) {
+            const headerName = headers[i] || `Column ${i+1}`;
+            const cellValue = row[i] || '';
+            let displayValue = cellValue;
+
+            const isMetadata = metadataColumns.includes(headerName.toLowerCase());
+
+            if (!isMetadata) {
+                const numericValue = parseFloat(cellValue);
+                if ((!isNaN(numericValue) && numericValue < 50) || cellValue === '-') {
+                    displayValue += " <span class='fail-mark'>(Retake)</span>";
+                }
+            }
+            html += `<tr><th>${escapeHTML(headerName)}</th><td>${escapeHTML(displayValue)}</td></tr>`;
+        }
+
+        html += `</table>`;
+        html += `
+            <div class="btn-group no-print">
+                <button onclick="window.print()" class="btn-print">Print / Save as PDF</button>
+                <button onclick="resetSearch()" class="btn-reset">Search Again</button>
+            </div>
+        `;
+
+        resultSection.innerHTML = html;
+        resultSection.style.display = 'block';
+    }
+
+    // Function to insert data into Supabase
+    async function logVisitToSupabase(name, regNumber) {
+        if (!SUPABASE_URL || SUPABASE_URL === "YOUR_SUPABASE_URL") return;
+
+        try {
+            const { error } = await supabase
+                .from('visitor_logs')
+                .insert([
+                    { student_name: name, reg_number: regNumber }
+                ]);
+            
+            if (error) throw error;
+            console.log("Logged securely to Supabase.");
+        } catch (error) {
+            console.error("Error logging to Supabase:", error.message);
+        }
+    }
+
+    function resetSearch() {
+        document.getElementById('searchForm').reset();
+        document.getElementById('result-section').style.display = 'none';
+        document.getElementById('form-section').style.display = 'block';
+    }
+
+    function escapeHTML(str) {
+        if (str.includes("<span class='fail-mark'>")) return str; 
+        const div = document.createElement('div');
+        div.innerText = str;
+        return div.innerHTML;
+    }
+</script>
+
+</body>
+</html>
