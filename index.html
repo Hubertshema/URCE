@@ -79,7 +79,7 @@
             </form>
         </div>
 
-        <div id="loading">Searching records, please wait...</div>
+        <div id="loading">Searching database records, please wait...</div>
         <div id="result-section" style="display: none;"></div>
 
     </div>
@@ -94,25 +94,13 @@
 </footer>
 
 <script>
-    // --- 1. SET UP SUPABASE ---
-    // Make sure to add your actual Project URL here:
+    // --- 1. SUPABASE CONNECTION ---
     const SUPABASE_URL = "https://bguagtnuoagmlskwqhgf.supabase.co"; 
+    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJndWFndG51b2FnbWxza3dxaGdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNzU3MjUsImV4cCI6MjA5NDg1MTcyNX0.EM7wYMgU748_XPZ8BdJwLzrN2Fr8w-oHsPGcDQYdAA0"; 
     
-    // Publishable key from your screenshot (Make sure to copy the full key from your dashboard to replace the "...")
-    const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJndWFndG51b2FnbWxza3dxaGdmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzkyNzU3MjUsImV4cCI6MjA5NDg1MTcyNX0.EM7wYMgU748_XPZ8BdJwLzrN2Fr8w-oHsPGcDQYdAA0";
-    
-    // Initialize Supabase client
-    // Renamed the variable to 'supabaseClient' to avoid conflicting with the global 'supabase' library namespace
     const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-    // --- 2. LIST OF CSV FILES ---
-    const filesToSearch = [
-        'marks.csv', 'MCE.csv', 'ME.csv', 'MPE.csv', 'PSE.CSV', 'BSE.csv', 
-        'PCE.csv', 'PGE3.CSV', 'PCE3.CSV', 'BCE3.CSV', 'EPSYEAR1.csv', 
-        'ECEYEAR1.csv', 'SNEYEAR1.csv', 'BCEYEAR1.csv', 'CSEYEAR1.csv', 
-        'MEYEAR1.csv', 'MCEYEAR1.csv', 'MPEYEAR1.csv', 'PCEYEAR1.csv', 'PESYEAR1.csv'
-    ];
-
+    // --- 2. SEARCH HANDLER ---
     document.getElementById('searchForm').addEventListener('submit', async function(e) {
         e.preventDefault();
 
@@ -127,75 +115,92 @@
         resultSection.style.display = 'none';
         loadingDiv.style.display = 'block';
 
-        let found = false;
+        try {
+            // Securely call the database RPC function to request the single matched row
+            const { data, error } = await supabaseClient.rpc('get_my_marks', { search_id: regNumber });
 
-        for (const file of filesToSearch) {
-            try {
-                const response = await fetch(file);
-                if (!response.ok) continue; 
+            if (error) throw error;
+
+            if (data && data.length > 0) {
+                const record = data[0];
+                const programName = record.program_name || "N/A";
                 
-                const csvText = await response.text();
-                const lines = csvText.split('\n').map(line => line.replace(/\r/g, '').trim()).filter(line => line.length > 0);
-                if (lines.length < 2) continue; 
-
-                const headers = lines[0].split(',').map(h => h.trim());
-
-                for (let i = 1; i < lines.length; i++) {
-                    const row = lines[i].split(',').map(c => c.trim());
-                    
-                    if (row[1] === regNumber) {
-                        found = true;
-                        
-                        // Render UI immediately
-                        renderResults(headers, row, regNumber);
-                        
-                        // Send log to Supabase in the background
-                        logVisitToSupabase(studentName, regNumber);
-                        
-                        break; 
-                    }
-                }
-                if (found) break; 
-            } catch (error) {
-                console.warn(`Could not load ${file}:`, error);
+                // Safely handle both Object and String types returned for JSONB columns
+                const marksObject = typeof record.marks === 'string' ? JSON.parse(record.marks) : record.marks;
+                
+                // Render grades results to HTML layout
+                renderResults(marksObject, regNumber, programName);
+                
+                // Log visit asynchronously in background
+                logVisitToSupabase(studentName, regNumber);
+            } else {
+                showNotFound();
             }
+        } catch (error) {
+            console.error("Database connection failure:", error);
+            showNotFound();
         }
 
         loadingDiv.style.display = 'none';
-
-        if (!found) {
-            resultSection.innerHTML = `
-                <p class='error'>Registration Number not found in any record. Please verify your ID.</p>
-                <div class="no-print" style="margin-top: 20px;">
-                    <button onclick="resetSearch()" class="btn-reset">Try Again</button>
-                </div>
-            `;
-            resultSection.style.display = 'block';
-        }
     });
 
-    function renderResults(headers, row, regNumber) {
+    // --- 3. DYNAMIC RESULTS RENDERING ---
+    function renderResults(marks, regNumber, programName) {
         const resultSection = document.getElementById('result-section');
-        const metadataColumns = ['s/n', 'id', 'gender', 'total', 'percentage', 'per', 'rank'];
+        const metadataKeys = ['gender', 'total', 'percentage', 'percentag', 'rank'];
         
         let html = `<h3 style='color: #004488; margin-top:10px;'>Official Results</h3>`;
-        html += `<h4 style='color: #333;'>Reg Number: ${regNumber}</h4>`;
+        html += `<h4 style='color: #333; margin-bottom:5px;'>Reg Number: ${regNumber}</h4>`;
+        html += `<p style='color: #666; margin: 0 0 15px 0; font-weight: bold;'>Program: ${programName.toUpperCase()}</p>`;
         html += `<table>`;
 
-        for (let i = 0; i < headers.length; i++) {
-            const headerName = headers[i] || `Column ${i+1}`;
-            const cellValue = row[i] || '';
-            let displayValue = cellValue;
+        // Organize keys to show Gender first, then Modules, then Totals at the bottom
+        const keys = Object.keys(marks);
+        const sortedKeys = keys.sort((a, b) => {
+            const isMetaA = metadataKeys.includes(a.toLowerCase());
+            const isMetaB = metadataKeys.includes(b.toLowerCase());
+            
+            if (a.toLowerCase() === 'gender') return -1;
+            if (b.toLowerCase() === 'gender') return 1;
+            
+            if (!isMetaA && isMetaB) return -1;
+            if (isMetaA && !isMetaB) return 1;
+            return 0;
+        });
 
-            const isMetadata = metadataColumns.includes(headerName.toLowerCase());
+        // Iterate through properties dynamically stored in JSONB marks container
+        for (const key of sortedKeys) {
+            const value = marks[key];
+            let displayValue = String(value);
+            let displayHeader = key;
 
+            // Handle clean naming for standard table metadata
+            if (key.toLowerCase() === 'percentag' || key.toLowerCase() === 'percentage') {
+                displayHeader = 'Percentage';
+            } else if (key.toLowerCase() === 'total') {
+                displayHeader = 'Total Score';
+            } else if (key.toLowerCase() === 'rank') {
+                displayHeader = 'Class Rank';
+            } else if (key.toLowerCase() === 'gender') {
+                displayHeader = 'Gender';
+            }
+
+            // Flag failure scores below 50 or absent values '-'
+            const isMetadata = metadataKeys.includes(key.toLowerCase());
             if (!isMetadata) {
-                const numericValue = parseFloat(cellValue);
-                if ((!isNaN(numericValue) && numericValue < 50) || cellValue === '-') {
+                const numericValue = parseFloat(value);
+                if ((!isNaN(numericValue) && numericValue < 50) || value === '-') {
                     displayValue += " <span class='fail-mark'>(Retake)</span>";
                 }
             }
-            html += `<tr><th>${escapeHTML(headerName)}</th><td>${escapeHTML(displayValue)}</td></tr>`;
+
+            // Highlight the final summary stats row
+            let rowStyle = "";
+            if (isMetadata && key.toLowerCase() !== 'gender') {
+                rowStyle = "style='background-color: #e6f0fa; font-weight: bold;'";
+            }
+
+            html += `<tr ${rowStyle}><th>${escapeHTML(displayHeader)}</th><td>${escapeHTML(displayValue)}</td></tr>`;
         }
 
         html += `</table>`;
@@ -210,22 +215,21 @@
         resultSection.style.display = 'block';
     }
 
-    // Function to insert data into Supabase
-    async function logVisitToSupabase(name, regNumber) {
-        if (!SUPABASE_URL || SUPABASE_URL === "YOUR_SUPABASE_URL") return;
+    function logVisitToSupabase(name, regNumber) {
+        supabaseClient.from('visitor_logs').insert([{ student_name: name, reg_number: regNumber }])
+            .then(() => console.log("Visit securely logged to database."))
+            .catch(err => console.error("Logging failed:", err));
+    }
 
-        try {
-            const { error } = await supabaseClient
-                .from('visitor_logs')
-                .insert([
-                    { student_name: name, reg_number: regNumber }
-                ]);
-            
-            if (error) throw error;
-            console.log("Logged securely to Supabase.");
-        } catch (error) {
-            console.error("Error logging to Supabase:", error.message);
-        }
+    function showNotFound() {
+        const resultSection = document.getElementById('result-section');
+        resultSection.innerHTML = `
+            <p class='error'>Registration Number not found in any record. Please verify your ID.</p>
+            <div class="no-print" style="margin-top: 20px;">
+                <button onclick="resetSearch()" class="btn-reset">Try Again</button>
+            </div>
+        `;
+        resultSection.style.display = 'block';
     }
 
     function resetSearch() {
