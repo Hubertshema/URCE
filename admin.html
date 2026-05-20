@@ -22,6 +22,7 @@
         th, td { padding: 12px; border: 1px solid #ddd; text-align: left; }
         th { background-color: #004488; color: white; }
         tr:nth-child(even) { background-color: #f9f9f9; }
+        .badge { background-color: #28a745; color: white; padding: 3px 8px; border-radius: 12px; font-size: 13px; font-weight: bold; }
         
         /* Buttons & Text */
         .btn-logout { background-color: #cc0000; margin-top: 20px; width: auto; display: inline-block; }
@@ -53,7 +54,7 @@
 
     <div class="container" id="dashboard-section">
         <h2 style="color: #004488;">Student Visit Logs</h2>
-        <p>These logs are securely fetched from Supabase.</p>
+        <p>This shows a unique list of students who have checked their marks.</p>
         
         <p id="loading-message" style="font-weight: bold; color: #004488;">Fetching logs...</p>
 
@@ -62,8 +63,9 @@
                 <tr>
                     <th>S/N</th>
                     <th>Student Name</th>
-                    <th>Registration Number</th>
-                    <th>Date & Time Checked</th>
+                    <th>Registration Number (ID)</th>
+                    <th>Total Checks</th>
+                    <th>Most Recent Visit (Rwanda Time)</th>
                 </tr>
             </thead>
             <tbody id="logs-body">
@@ -80,7 +82,6 @@
         const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
         // --- 2. CHECK SESSION ON PAGE LOAD ---
-        // This runs instantly to see if the user is already logged in
         async function checkSession() {
             const { data: { session } } = await supabaseClient.auth.getSession();
             if (session) {
@@ -96,9 +97,8 @@
             const passwordInput = document.getElementById('password').value;
             const errorElement = document.getElementById('login-error');
 
-            errorElement.style.display = 'none'; // Clear old errors
+            errorElement.style.display = 'none';
 
-            // Attempt to log in with Supabase
             const { data, error } = await supabaseClient.auth.signInWithPassword({
                 email: emailInput,
                 password: passwordInput,
@@ -118,7 +118,7 @@
             document.getElementById('dashboard-section').style.display = 'block';
 
             try {
-                // Because we are logged in, the database will accept this request
+                // Fetch all logs, ordered newest to oldest
                 const { data, error } = await supabaseClient
                     .from('visitor_logs')
                     .select('*')
@@ -134,7 +134,7 @@
             }
         }
 
-        // --- 5. RENDER DATA TO TABLE ---
+        // --- 5. GROUP DATA AND RENDER TO TABLE ---
         function displayData(logs) {
             const tableBody = document.getElementById('logs-body');
             const table = document.getElementById('logs-table');
@@ -144,19 +144,52 @@
             table.style.display = 'table';
 
             if (logs.length === 0) {
-                tableBody.innerHTML = "<tr><td colspan='4' style='text-align:center;'>No logs found.</td></tr>";
+                tableBody.innerHTML = "<tr><td colspan='5' style='text-align:center;'>No logs found.</td></tr>";
                 return;
             }
 
-            tableBody.innerHTML = ""; // Clear existing rows
-            logs.forEach((log, index) => {
-                const dateObj = new Date(log.created_at);
-                const readableTime = dateObj.toLocaleString(); 
+            // Step A: Group the logs by Registration Number
+            const uniqueStudents = {};
+
+            logs.forEach(log => {
+                const id = log.reg_number;
+                const name = log.student_name || "<i>No Name Saved</i>";
+                const time = log.created_at;
+
+                if (!uniqueStudents[id]) {
+                    // First time seeing this ID (Because logs are sorted newest first, this is the most recent visit)
+                    uniqueStudents[id] = {
+                        name: name,
+                        id: id,
+                        visits: 1,
+                        last_time: time
+                    };
+                } else {
+                    // We've seen this ID before, just add to their total visits count
+                    uniqueStudents[id].visits++;
+                }
+            });
+
+            // Convert our grouped object into an array so we can sort it
+            const studentsArray = Object.values(uniqueStudents);
+
+            // Step B: Sort the array so the student who visited most recently is at the very top
+            studentsArray.sort((a, b) => new Date(b.last_time) - new Date(a.last_time));
+
+            // Step C: Build the HTML rows
+            tableBody.innerHTML = ""; 
+            
+            studentsArray.forEach((student, index) => {
+                // Format the time specifically for Rwanda Time
+                const dateObj = new Date(student.last_time);
+                const readableTime = dateObj.toLocaleString('en-US', { timeZone: 'Africa/Kigali' }); 
+                
                 const row = `
                     <tr>
                         <td>${index + 1}</td>
-                        <td>${log.student_name}</td>
-                        <td><b>${log.reg_number}</b></td>
+                        <td>${student.name}</td>
+                        <td><b>${student.id}</b></td>
+                        <td><span class="badge">${student.visits}</span></td>
                         <td>${readableTime}</td>
                     </tr>
                 `;
@@ -168,7 +201,6 @@
         async function logoutAdmin() {
             const { error } = await supabaseClient.auth.signOut();
             if (!error) {
-                // Clear the table and show the login screen again
                 document.getElementById('dashboard-section').style.display = 'none';
                 document.getElementById('login-section').style.display = 'block';
                 document.getElementById('login-form').reset();
